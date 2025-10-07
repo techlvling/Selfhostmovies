@@ -2,11 +2,24 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# 🎬 Selfhostmovies Installer v1.1
-# by Tech Lvling (https://www.youtube.com/@TechLeveling)
+# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling)
+# Auto-fixes line endings, adds style & power
 # ─────────────────────────────────────────────
 
-# Functions for animation
+# --- 🩹 Auto Fix CRLF Line Endings ---
+if file "$0" | grep -q "CRLF"; then
+  echo -e "\033[1;33m[!] CRLF line endings detected — fixing with dos2unix...\033[0m"
+  if ! command -v dos2unix &>/dev/null; then
+    echo -e "\033[1;34mInstalling dos2unix...\033[0m"
+    sudo apt update -y && sudo apt install -y dos2unix
+  fi
+  sudo dos2unix "$0" >/dev/null 2>&1
+  echo -e "\033[1;32m[✓] Fixed line endings — re-running installer...\033[0m"
+  exec bash "$0"
+  exit 0
+fi
+
+# --- Animation Setup ---
 spinner="/-\|"
 function animate() {
   local msg=$1
@@ -24,14 +37,12 @@ function stop_animation() {
   printf "\b✓\n"
 }
 
-# ─────────────────────────────────────────────
-# Fancy ASCII Intro
-# ─────────────────────────────────────────────
+# --- Animated Intro ---
 clear
 echo -e "\033[1;36m"
 echo "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
-echo "┃          🚀  Tech Lvling Presents...          ┃"
-echo "┃             🧠 Selfhostmovies v1.1            ┃"
+echo "┃        🚀  Tech Lvling Presents...           ┃"
+echo "┃           🧠 Selfhostmovies v1.2             ┃"
 echo "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
 echo -e "\033[0m"
 sleep 1
@@ -40,30 +51,18 @@ animate "Booting media stack..." & PID=$!
 sleep 2; stop_animation $PID
 animate "Loading Docker modules..." & PID=$!
 sleep 2; stop_animation $PID
-animate "Calibrating torrent velocity..." & PID=$!
-sleep 2; stop_animation $PID
 animate "Contacting Jellyfin gods..." & PID=$!
 sleep 2; stop_animation $PID
 echo -e "\033[1;32mSystem online. Let's build your own Netflix.\033[0m"
 sleep 1
 echo "───────────────────────────────────────────────"
-sleep 1
 
-# ─────────────────────────────────────────────
-# System Prep
-# ─────────────────────────────────────────────
+# --- Step 1: Dependencies ---
 echo -e "\n\033[1;34m[ Step 1/5 ] Installing dependencies...\033[0m"
 sudo apt update -y
 sudo apt install -y curl git ca-certificates gnupg lsb-release ipcalc dos2unix
 
-# Fix line endings automatically (just in case)
-if command -v dos2unix >/dev/null 2>&1; then
-  dos2unix "$0" 2>/dev/null || true
-fi
-
-# ─────────────────────────────────────────────
-# Network Detection + Static IP Option
-# ─────────────────────────────────────────────
+# --- Step 2: Network Setup ---
 echo -e "\n\033[1;34m[ Step 2/5 ] Network configuration...\033[0m"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}' || true)
 CIDR=$(ip -o -f inet addr show "$IFACE" | awk '{print $4}' | head -n1 || echo "")
@@ -95,12 +94,10 @@ YAML
   sudo netplan apply
   echo "Static IP applied successfully."
 else
-  echo "Using DHCP (default network mode)."
+  echo "Using DHCP (default)."
 fi
 
-# ─────────────────────────────────────────────
-# Docker Setup
-# ─────────────────────────────────────────────
+# --- Step 3: Docker Setup ---
 echo -e "\n\033[1;34m[ Step 3/5 ] Installing Docker + Compose...\033[0m"
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -111,29 +108,22 @@ sudo apt update -y
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 sudo systemctl enable --now docker
 
-# ─────────────────────────────────────────────
-# Folder Setup
-# ─────────────────────────────────────────────
+# --- Step 4: Media Folders ---
 echo -e "\n\033[1;34m[ Step 4/5 ] Setting up media folders...\033[0m"
 sudo mkdir -p /mnt/media/{Movies,TV,Downloads,docker}
 sudo chown -R 1000:1000 /mnt/media
 sudo chmod -R 775 /mnt/media
 
-# ─────────────────────────────────────────────
-# Optional VPN Setup
-# ─────────────────────────────────────────────
+# --- Step 5: VPN Setup ---
 echo -e "\n\033[1;34m[ Step 5/5 ] Optional VPN setup (Mullvad WireGuard)...\033[0m"
 read -rp "Enter Mullvad WireGuard Private Key (or press Enter to skip): " MULLVAD_KEY
 if [ -n "${MULLVAD_KEY:-}" ]; then
   read -rp "Enter Mullvad WireGuard Address (e.g. 10.64.42.2/32): " MULLVAD_ADDR
 fi
 
-# ─────────────────────────────────────────────
-# Compose File Generation
-# ─────────────────────────────────────────────
+# --- Generate Docker Compose ---
 COMPOSE_FILE="/mnt/media/docker/docker-compose.yml"
 echo -e "\n\033[1;34mGenerating docker-compose.yml...\033[0m"
-
 cat > "$COMPOSE_FILE" <<YML
 version: "3.9"
 
@@ -256,23 +246,17 @@ cat >> "$COMPOSE_FILE" <<'YML'
     restart: unless-stopped
 YML
 
-# ─────────────────────────────────────────────
-# Start Containers
-# ─────────────────────────────────────────────
+# --- Launch Containers ---
 echo -e "\n\033[1;32mStarting containers...\033[0m"
 cd /mnt/media/docker
 sudo docker compose up -d
 
-# ─────────────────────────────────────────────
-# Fancy Outro
-# ─────────────────────────────────────────────
+# --- Outro ---
 clear
 sleep 1
-echo -e "\033[1;36m"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " 🎉  Setup Complete! Welcome to your Fckin nflix! 🎉"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "\033[0m"
+echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[1;32m 🎉 Setup Complete! Welcome to your media empire! 🎉\033[0m"
+echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 sleep 1
 echo -e "👉  Jellyfin:  http://$CURRENT_IP:8096"
 echo -e "👉  Radarr:    http://$CURRENT_IP:7878"
@@ -290,5 +274,5 @@ echo
 sleep 1
 echo -e "\033[1;35m👾 Made with ❤️ by Tech Lvling — Subscribe for more setups!\033[0m"
 echo -e "\033[1;34m📺 YouTube: https://www.youtube.com/@techlvling\033[0m"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 sleep 2
