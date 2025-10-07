@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling) - modified
-# Replaces MediaFusion with dreulavelle/Prowlarr-Indexers custom YAMLs
+# 🎬 Selfhostmovies Installer v1.4 (Tech Lvling)
+# Replaces MediaFusion with dreulavelle/Prowlarr-Indexers + FlareSolverr (host-exposed)
 # ─────────────────────────────────────────────
 
 # --- 🩹 Auto Fix CRLF Line Endings ---
@@ -76,7 +76,7 @@ clear
 echo -e "\033[1;36m"
 echo "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
 echo "┃        🚀  Tech Lvling Presents...           ┃"
-echo "┃           🧠 Selfhostmovies v1.2             ┃"
+echo "┃           🧠 Selfhostmovies v1.4             ┃"
 echo "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
 echo -e "\033[0m"
 sleep 1
@@ -92,12 +92,12 @@ sleep 1
 echo "───────────────────────────────────────────────"
 
 # --- Step 1: Dependencies ---
-echo -e "\n\033[1;34m[ Step 1/5 ] Installing dependencies...\033[0m"
+echo -e "\n\033[1;34m[ Step 1/6 ] Installing dependencies...\033[0m"
 sudo apt update -y
 sudo apt install -y curl git ca-certificates gnupg lsb-release ipcalc dos2unix unzip
 
 # --- Step 2: Network Setup ---
-echo -e "\n\033[1;34m[ Step 2/5 ] Network configuration...\033[0m"
+echo -e "\n\033[1;34m[ Step 2/6 ] Network configuration...\033[0m"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}' || true)
 CIDR=$(ip -o -f inet addr show "$IFACE" | awk '{print $4}' | head -n1 || echo "")
 CURRENT_IP=$(echo "$CIDR" | cut -d/ -f1)
@@ -132,7 +132,7 @@ else
 fi
 
 # --- Step 3: Docker Setup ---
-echo -e "\n\033[1;34m[ Step 3/5 ] Installing Docker + Compose...\033[0m"
+echo -e "\n\033[1;34m[ Step 3/6 ] Installing Docker + Compose...\033[0m"
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
@@ -143,21 +143,21 @@ sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 sudo systemctl enable --now docker
 
 # --- Step 4: Media Folders ---
-echo -e "\n\033[1;34m[ Step 4/5 ] Setting up media folders...\033[0m"
+echo -e "\n\033[1;34m[ Step 4/6 ] Setting up media folders...\033[0m"
 sudo mkdir -p /mnt/media/{Movies,TV,Downloads,docker}
 sudo chown -R 1000:1000 /mnt/media
 sudo chmod -R 775 /mnt/media
 
 # --- Step 5: VPN Setup ---
-echo -e "\n\033[1;34m[ Step 5/5 ] Optional VPN setup (Mullvad WireGuard)...\033[0m"
+echo -e "\n\033[1;34m[ Step 5/6 ] Optional VPN setup (Mullvad WireGuard)...\033[0m"
 read -rp "Enter Mullvad WireGuard Private Key (or press Enter to skip): " MULLVAD_KEY
 if [ -n "${MULLVAD_KEY:-}" ]; then
   read -rp "Enter Mullvad WireGuard Address (e.g. 10.64.42.2/32): " MULLVAD_ADDR
 fi
 
-# --- Generate Docker Compose ---
+# --- Step 6: Generate Docker Compose ---
 COMPOSE_FILE="/mnt/media/docker/docker-compose.yml"
-echo -e "\n\033[1;34mGenerating docker-compose.yml...\033[0m"
+echo -e "\n\033[1;34m[ Step 6/6 ] Generating docker-compose.yml...\033[0m"
 sudo mkdir -p /mnt/media/docker
 cat > "$COMPOSE_FILE" <<YML
 version: "3.9"
@@ -282,6 +282,27 @@ cat >> "$COMPOSE_FILE" <<'YML'
 
 YML
 
+# --- Add FlareSolverr service (always host-exposed; never routed through gluetun) ---
+# Create config dir for FlareSolverr first
+sudo mkdir -p /mnt/media/docker/flaresolverr
+sudo chown -R 1000:1000 /mnt/media/docker/flaresolverr
+
+echo -e "\n\033[1;34m[+] Appending FlareSolverr service to docker-compose.yml (host-exposed)...\033[0m"
+cat >> "$COMPOSE_FILE" <<'YML'
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - MAX_TIMEOUT=120000
+    ports:
+      - 8191:8191
+    volumes:
+      - /mnt/media/docker/flaresolverr:/config
+    restart: unless-stopped
+YML
+
 # --- Install dreulavelle/Prowlarr-Indexers YAMLs into Prowlarr custom definitions ---
 PROWLARR_CUSTOM_DIR="/mnt/media/docker/prowlarr/Definitions/Custom"
 PROWLARR_INDEXERS_ZIP_URL="https://github.com/dreulavelle/Prowlarr-Indexers/archive/refs/heads/main.zip"
@@ -312,12 +333,12 @@ else
 fi
 
 # --- Launch Containers ---
-echo -e "\n\033[1;32mStarting containers...\033[0m"
+echo -e "\n\033[1;32mStarting containers (this will bring up everything including flaresolverr)...\033[0m"
 cd /mnt/media/docker
 sudo docker compose up -d
 
-# --- Ensure Prowlarr restart so it picks up new custom definitions ---
-echo -e "\n\033[1;34m[+] Restarting Prowlarr to pick up custom indexer definitions...\033[0m"
+# --- Ensure Prowlarr restart so it picks up new custom definitions and FlareSolverr proxy availability ---
+echo -e "\n\033[1;34m[+] Restarting Prowlarr to pick up custom indexer definitions and proxy...\033[0m"
 sudo docker restart prowlarr || true
 sleep 4
 
@@ -325,7 +346,7 @@ sleep 4
 clear
 sleep 1
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-echo -e "\033[1;32m 🎉 Setup Complete! Welcome to your media empire! 🎉\033[0m"
+echo -e "\033[1;32m 🎉 Setup Complete! FlareSolverr added and host-exposed on port 8191. 🎉\033[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 sleep 1
 echo -e "👉  Jellyfin:      http://$CURRENT_IP:8096"
@@ -333,12 +354,11 @@ echo -e "👉  Radarr:        http://$CURRENT_IP:7878"
 echo -e "👉  Sonarr:        http://$CURRENT_IP:8989"
 echo -e "👉  Prowlarr:      http://$CURRENT_IP:9696"
 echo -e "👉  Deluge:        http://$CURRENT_IP:8112"
-sleep 1
-if [ -n "${MULLVAD_KEY:-}" ]; then
-  echo -e "\033[1;33mVPN ENABLED:\033[0m Deluge & Prowlarr are routed through Gluetun (Mullvad)."
-else
-  echo -e "\033[1;33mVPN DISABLED:\033[0m Running locally (no tunneling)."
-fi
+echo
+echo -e "\033[1;33mFlareSolverr (host-exposed):\033[0m http://$CURRENT_IP:8191"
+echo -e "\033[1;33mImportant:\033[0m If you keep Prowlarr running inside the gluetun (VPN) namespace, point Prowlarr's FlareSolverr proxy to the host IP above (e.g. http://$CURRENT_IP:8191). If you run into connectivity issues, either:"
+echo -e "  • move Prowlarr off the gluetun namespace (remove network_mode), or"
+echo -e "  • run FlareSolverr inside the gluetun namespace instead (not recommended since you asked for host-exposed)."
 echo
 sleep 1
 echo -e "\033[1;35m👾 Made with ❤️ by Tech Lvling — Subscribe for more setups!\033[0m"
