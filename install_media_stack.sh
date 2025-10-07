@@ -3,8 +3,7 @@ set -euo pipefail
 
 # ─────────────────────────────────────────────
 # 🎬 Selfhostmovies Installer v1.2 (Tech Lvling) - patched
-# Adds: optional purge & MediaFusion service
-# Auto-fixes line endings, adds style & power
+# Adds: optional purge, MediaFusion service + Prowlarr custom indexer YAML
 # ─────────────────────────────────────────────
 
 # --- 🩹 Auto Fix CRLF Line Endings ---
@@ -302,10 +301,31 @@ cat >> "$COMPOSE_FILE" <<'YML'
     restart: unless-stopped
 YML
 
+# --- Place MediaFusion YAML into Prowlarr custom definitions so Prowlarr can add it as an indexer ---
+# Prowlarr will read custom indexer definitions from <config>/Definitions/Custom/
+# We'll fetch upstream mediafusion.yaml and place it under the Prowlarr config bind on the host.
+PROWLARR_CUSTOM_DIR="/mnt/media/docker/prowlarr/Definitions/Custom"
+MEDIAFUSION_YAML_URL="https://raw.githubusercontent.com/mhdzumair/MediaFusion/main/resources/yaml/mediafusion.yaml"
+sudo mkdir -p "$PROWLARR_CUSTOM_DIR"
+echo -e "\n\033[1;34m[+] Downloading MediaFusion indexer definition to Prowlarr custom definitions...\033[0m"
+if curl -fL "$MEDIAFUSION_YAML_URL" -o /tmp/mediafusion.yml; then
+  sudo mv /tmp/mediafusion.yml "$PROWLARR_CUSTOM_DIR/mediafusion.yaml"
+  sudo chown -R 1000:1000 /mnt/media/docker/prowlarr
+  echo -e "\033[1;32m[✓] mediafusion.yaml saved to $PROWLARR_CUSTOM_DIR/mediafusion.yaml\033[0m"
+else
+  echo -e "\033[1;31m[!] Failed to download mediafusion.yaml from upstream. You can download manually from:\033[0m"
+  echo -e "    $MEDIAFUSION_YAML_URL"
+fi
+
 # --- Launch Containers ---
 echo -e "\n\033[1;32mStarting containers...\033[0m"
 cd /mnt/media/docker
 sudo docker compose up -d
+
+# --- Ensure Prowlarr restart so it picks up new custom definitions ---
+echo -e "\n\033[1;34m[+] Restarting Prowlarr to pick up custom indexer definitions...\033[0m"
+sudo docker restart prowlarr || true
+sleep 4
 
 # --- Outro ---
 clear
