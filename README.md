@@ -15,7 +15,4 @@ Let’s fix that. This setup turns your PC or server into your **own private str
 💡 **Pre-Check (run this once):**
 ```bash
 sudo apt update && sudo apt install -y git dos2unix
-git clone https://github.com/techlvling/Selfhostmovies.git
-cd Selfhostmovies
-chmod +x install_media_stack.sh
-sudo ./install_media_stack.sh
+
