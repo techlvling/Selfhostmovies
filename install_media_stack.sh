@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling)
+# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling) - patched
+# Adds: optional purge & MediaFusion service
 # Auto-fixes line endings, adds style & power
 # ─────────────────────────────────────────────
 
@@ -17,6 +18,40 @@ if file "$0" | grep -q "CRLF"; then
   echo -e "\033[1;32m[✓] Fixed line endings — re-running installer...\033[0m"
   exec bash "$0"
   exit 0
+fi
+
+# --- OPTIONAL: Purge existing Docker + Data (SAFE CHECKS) ---
+echo -e "\n\033[1;33m[!] Want to wipe all existing Docker containers, images, volumes, networks and /mnt/media/docker before continuing? This is destructive.\033[0m"
+read -rp "Type 'YES-DELETE' to proceed, anything else to skip: " CONFIRM_PURGE
+if [[ "${CONFIRM_PURGE:-}" == "YES-DELETE" ]]; then
+  echo -e "\033[1;31mPreparing to purge Docker resources. Listing containers and images...\033[0m"
+  docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" || true
+  echo
+  read -rp "Last chance — type 'CONFIRM-FOREVER' to actually delete everything: " CONFIRM_FOREVER
+  if [[ "${CONFIRM_FOREVER:-}" == "CONFIRM-FOREVER" ]]; then
+    echo -e "\033[1;31m[!] Stopping all containers...\033[0m"
+    sudo docker stop $(docker ps -aq) 2>/dev/null || true
+    echo -e "\033[1;31m[!] Removing all containers...\033[0m"
+    sudo docker rm -f $(docker ps -aq) 2>/dev/null || true
+    echo -e "\033[1;31m[!] Removing all images (this can take a while)...\033[0m"
+    sudo docker rmi -f $(docker images -aq) 2>/dev/null || true
+    echo -e "\033[1;31m[!] Removing all volumes...\033[0m"
+    sudo docker volume rm $(docker volume ls -q) 2>/dev/null || true
+    echo -e "\033[1;31m[!] Removing all user-defined networks (except default)...\033[0m"
+    for net in $(docker network ls --format '{{.Name}}'); do
+      if [[ ! "$net" =~ ^(bridge|host|none)$ ]]; then
+        sudo docker network rm "$net" 2>/dev/null || true
+      fi
+    done
+    echo -e "\033[1;31m[!] Deleting /mnt/media/docker (if present) and docker-compose files...\033[0m"
+    sudo rm -rf /mnt/media/docker || true
+    sudo rm -f /mnt/media/docker-compose.yml /mnt/media/docker/*.yml 2>/dev/null || true
+    echo -e "\033[1;32m[✓] Purge complete. Docker and /mnt/media/docker cleaned.\033[0m"
+  else
+    echo -e "\033[1;33m[PURGE SKIPPED] You didn't confirm the final delete token.\033[0m"
+  fi
+else
+  echo -e "\033[1;34m[SKIP] Keeping existing Docker state.\033[0m"
 fi
 
 # --- Animation Setup ---
@@ -124,6 +159,7 @@ fi
 # --- Generate Docker Compose ---
 COMPOSE_FILE="/mnt/media/docker/docker-compose.yml"
 echo -e "\n\033[1;34mGenerating docker-compose.yml...\033[0m"
+sudo mkdir -p /mnt/media/docker
 cat > "$COMPOSE_FILE" <<YML
 version: "3.9"
 
@@ -244,6 +280,26 @@ cat >> "$COMPOSE_FILE" <<'YML'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+
+  # -------------------------
+  # MediaFusion (self-hosted)
+  # upstream: https://github.com/mhdzumair/MediaFusion
+  # Docker image: mhdzumair/mediafusion:latest
+  # -------------------------
+  mediafusion:
+    image: mhdzumair/mediafusion:latest
+    container_name: mediafusion
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      # Optional: set an API/admin password (uncomment and change if desired)
+      # - MEDIAFUSION_API_PASSWORD=changeme
+    volumes:
+      - /mnt/media/docker/mediafusion:/data
+    ports:
+      - 5000:5000
+    restart: unless-stopped
 YML
 
 # --- Launch Containers ---
@@ -258,11 +314,12 @@ echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━�
 echo -e "\033[1;32m 🎉 Setup Complete! Welcome to your media empire! 🎉\033[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 sleep 1
-echo -e "👉  Jellyfin:  http://$CURRENT_IP:8096"
-echo -e "👉  Radarr:    http://$CURRENT_IP:7878"
-echo -e "👉  Sonarr:    http://$CURRENT_IP:8989"
-echo -e "👉  Prowlarr:  http://$CURRENT_IP:9696"
-echo -e "👉  Deluge:    http://$CURRENT_IP:8112"
+echo -e "👉  Jellyfin:      http://$CURRENT_IP:8096"
+echo -e "👉  Radarr:        http://$CURRENT_IP:7878"
+echo -e "👉  Sonarr:        http://$CURRENT_IP:8989"
+echo -e "👉  Prowlarr:      http://$CURRENT_IP:9696"
+echo -e "👉  Deluge:        http://$CURRENT_IP:8112"
+echo -e "👉  MediaFusion:   http://$CURRENT_IP:5000"
 sleep 1
 echo
 if [ -n "${MULLVAD_KEY:-}" ]; then
