@@ -1,4 +1,5 @@
 # 🎬 Selfhostmovies – Build Your Own Netflix (by Tech Lvling)
+https://www.youtube.com/@TechLeveling
 
 Tired of hunting for your favorite shows across sketchy sites?  
 Let’s fix that. This setup turns your PC or server into your **own private streaming hub** — totally free, no subscriptions, no ads, no BS.
