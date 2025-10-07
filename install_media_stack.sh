@@ -1,55 +1,83 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# install_media_stack.sh
-# - Sets optional static IP via netplan (interactive)
-# - Installs Docker (and dependencies)
-# - Creates /mnt/media layout
-# - Writes docker-compose.yml with optional Mullvad WireGuard (Gluetun)
-# - Starts the stack
-#
-# IMPORTANT: If you supply Mullvad WireGuard Private Key and Address when prompted,
-# Deluge & Prowlarr will be routed through Gluetun. If you skip, everything runs locally.
+# ─────────────────────────────────────────────
+# 🎬 Selfhostmovies Installer v1.1
+# by Tech Lvling (https://www.youtube.com/@TechLeveling)
+# ─────────────────────────────────────────────
 
-echo "==> Prep: update & install prerequisites..."
+# Functions for animation
+spinner="/-\|"
+function animate() {
+  local msg=$1
+  echo -ne "$msg "
+  while :; do
+    for i in {0..3}; do
+      echo -ne "\b${spinner:i:1}"
+      sleep 0.1
+    done
+  done
+}
+
+function stop_animation() {
+  kill "$1" &>/dev/null || true
+  printf "\b✓\n"
+}
+
+# ─────────────────────────────────────────────
+# Fancy ASCII Intro
+# ─────────────────────────────────────────────
+clear
+echo -e "\033[1;36m"
+echo "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
+echo "┃          🚀  Tech Lvling Presents...          ┃"
+echo "┃             🧠 Selfhostmovies v1.1            ┃"
+echo "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
+echo -e "\033[0m"
+sleep 1
+echo
+animate "Booting media stack..." & PID=$!
+sleep 2; stop_animation $PID
+animate "Loading Docker modules..." & PID=$!
+sleep 2; stop_animation $PID
+animate "Calibrating torrent velocity..." & PID=$!
+sleep 2; stop_animation $PID
+animate "Contacting Jellyfin gods..." & PID=$!
+sleep 2; stop_animation $PID
+echo -e "\033[1;32mSystem online. Let's build your own Netflix.\033[0m"
+sleep 1
+echo "───────────────────────────────────────────────"
+sleep 1
+
+# ─────────────────────────────────────────────
+# System Prep
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;34m[ Step 1/5 ] Installing dependencies...\033[0m"
 sudo apt update -y
 sudo apt install -y curl git ca-certificates gnupg lsb-release ipcalc dos2unix
 
-# convert this script's line endings just in case (no harm)
+# Fix line endings automatically (just in case)
 if command -v dos2unix >/dev/null 2>&1; then
   dos2unix "$0" 2>/dev/null || true
 fi
 
-# -------------------------
-# Detect network info
-# -------------------------
+# ─────────────────────────────────────────────
+# Network Detection + Static IP Option
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;34m[ Step 2/5 ] Network configuration...\033[0m"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}' || true)
-if [ -z "$IFACE" ]; then
-  echo "ERROR: Could not detect default network interface. Exiting."
-  exit 1
-fi
+CIDR=$(ip -o -f inet addr show "$IFACE" | awk '{print $4}' | head -n1 || echo "")
+CURRENT_IP=$(echo "$CIDR" | cut -d/ -f1)
+GATEWAY=$(ip route | awk '/default/ {print $3; exit}')
 
-CIDR=$(ip -o -f inet addr show "$IFACE" | awk '{print $4}' | head -n1) || true
-CURRENT_IP=$(echo "$CIDR" | cut -d/ -f1 || true)
-CURRENT_CIDR="$CIDR"
-
-GATEWAY=$(ip route | awk '/default/ {print $3; exit}' || true)
 echo "Detected interface: $IFACE"
-echo "Detected address:  ${CURRENT_CIDR:-unknown}"
-echo "Detected gateway:  ${GATEWAY:-unknown}"
-echo "-----------------------------------------"
-
-# Ask user about static IP
-read -rp "Make this IP static on this machine? (y/N): " MAKE_STATIC
-if [[ "${MAKE_STATIC:-n}" =~ ^[Yy]$ ]]; then
-  read -rp "Static IP to use [default: ${CURRENT_IP:-}]: " STATIC_IP
-  STATIC_IP=${STATIC_IP:-$CURRENT_IP}
-  if [ -z "$STATIC_IP" ]; then
-    echo "No IP provided, aborting static setup."
-  else
-    NETPLAN_FILE="/etc/netplan/99-selfhost-static.yaml"
-    echo "Writing netplan config to $NETPLAN_FILE"
-    sudo tee "$NETPLAN_FILE" > /dev/null <<NETY
+echo "Detected IP:        $CURRENT_IP"
+echo "Detected gateway:   $GATEWAY"
+echo "───────────────────────────────────────────────"
+read -rp "Would you like to make this IP static? (y/N): " STATIC
+if [[ "${STATIC:-n}" =~ ^[Yy]$ ]]; then
+  NETPLAN_FILE="/etc/netplan/99-selfhost-static.yaml"
+  sudo tee "$NETPLAN_FILE" > /dev/null <<YAML
 network:
   version: 2
   renderer: networkd
@@ -57,61 +85,56 @@ network:
     $IFACE:
       dhcp4: no
       addresses:
-        - ${CURRENT_CIDR:-${STATIC_IP}/24}
-      gateway4: ${GATEWAY:-}
+        - ${CIDR}
+      routes:
+        - to: default
+          via: ${GATEWAY}
       nameservers:
         addresses: [1.1.1.1,8.8.8.8]
-NETY
-    echo "Applying netplan..."
-    sudo netplan apply || echo "netplan apply returned non-zero; check /etc/netplan"
-    echo "Static config applied (if no error shown)."
-  fi
+YAML
+  sudo netplan apply
+  echo "Static IP applied successfully."
 else
-  echo "Skipping static IP setup (DHCP remains)."
+  echo "Using DHCP (default network mode)."
 fi
 
-echo "-----------------------------------------"
-# -------------------------
-# Docker install
-# -------------------------
-echo "==> Installing Docker & Compose plugin..."
+# ─────────────────────────────────────────────
+# Docker Setup
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;34m[ Step 3/5 ] Installing Docker + Compose...\033[0m"
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update -y
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 sudo systemctl enable --now docker
 
-# -------------------------
-# Folder layout and perms
-# -------------------------
-echo "==> Creating media folders and docker workspace..."
+# ─────────────────────────────────────────────
+# Folder Setup
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;34m[ Step 4/5 ] Setting up media folders...\033[0m"
 sudo mkdir -p /mnt/media/{Movies,TV,Downloads,docker}
 sudo chown -R 1000:1000 /mnt/media
 sudo chmod -R 775 /mnt/media
 
-# -------------------------
-# Optional: ask for Mullvad WireGuard info
-# -------------------------
-echo
-echo "OPTIONAL VPN (Mullvad WireGuard) — leave blank to skip VPN."
-read -rp "Enter Mullvad WireGuard PRIVATE KEY (paste, then press Enter) or press Enter to skip: " MULLVAD_KEY
+# ─────────────────────────────────────────────
+# Optional VPN Setup
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;34m[ Step 5/5 ] Optional VPN setup (Mullvad WireGuard)...\033[0m"
+read -rp "Enter Mullvad WireGuard Private Key (or press Enter to skip): " MULLVAD_KEY
 if [ -n "${MULLVAD_KEY:-}" ]; then
-  read -rp "Enter Mullvad WireGuard ADDRESS (example: 10.64.42.2/32): " MULLVAD_ADDR
+  read -rp "Enter Mullvad WireGuard Address (e.g. 10.64.42.2/32): " MULLVAD_ADDR
 fi
 
-# -------------------------
-# Build docker-compose.yml dynamically
-# -------------------------
+# ─────────────────────────────────────────────
+# Compose File Generation
+# ─────────────────────────────────────────────
 COMPOSE_FILE="/mnt/media/docker/docker-compose.yml"
-echo "==> Writing docker-compose to $COMPOSE_FILE"
-sudo mkdir -p /mnt/media/docker
-sudo chown 1000:1000 /mnt/media/docker
+echo -e "\n\033[1;34mGenerating docker-compose.yml...\033[0m"
 
-# Using a temp file then move into place
-TMP_COMPOSE="$(mktemp)"
-cat > "$TMP_COMPOSE" <<'YML'
+cat > "$COMPOSE_FILE" <<YML
 version: "3.9"
 
 services:
@@ -127,15 +150,14 @@ services:
       - VPN_TYPE=wireguard
 YML
 
-# append WireGuard env lines conditionally
 if [ -n "${MULLVAD_KEY:-}" ]; then
-  cat >> "$TMP_COMPOSE" <<YML
+cat >> "$COMPOSE_FILE" <<YML
       - WIREGUARD_PRIVATE_KEY=${MULLVAD_KEY}
       - WIREGUARD_ADDRESSES=${MULLVAD_ADDR}
 YML
 fi
 
-cat >> "$TMP_COMPOSE" <<'YML'
+cat >> "$COMPOSE_FILE" <<'YML'
       - SERVER_CITIES=Singapore
       - TZ=Asia/Kolkata
     volumes:
@@ -144,10 +166,7 @@ cat >> "$TMP_COMPOSE" <<'YML'
       - 8112:8112
       - 9696:9696
     restart: unless-stopped
-YML
 
-# prowlarr block
-cat >> "$TMP_COMPOSE" <<'YML'
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
@@ -160,10 +179,10 @@ cat >> "$TMP_COMPOSE" <<'YML'
 YML
 
 if [ -n "${MULLVAD_KEY:-}" ]; then
-  echo '    network_mode: "container:gluetun"' >> "$TMP_COMPOSE"
+  echo '    network_mode: "container:gluetun"' >> "$COMPOSE_FILE"
 fi
 
-cat >> "$TMP_COMPOSE" <<'YML'
+cat >> "$COMPOSE_FILE" <<'YML'
     restart: unless-stopped
 
   radarr:
@@ -195,10 +214,7 @@ cat >> "$TMP_COMPOSE" <<'YML'
     ports:
       - 8989:8989
     restart: unless-stopped
-YML
 
-# deluge block
-cat >> "$TMP_COMPOSE" <<'YML'
   deluge:
     image: lscr.io/linuxserver/deluge:latest
     container_name: deluge
@@ -212,10 +228,10 @@ cat >> "$TMP_COMPOSE" <<'YML'
 YML
 
 if [ -n "${MULLVAD_KEY:-}" ]; then
-  echo '    network_mode: "container:gluetun"' >> "$TMP_COMPOSE"
+  echo '    network_mode: "container:gluetun"' >> "$COMPOSE_FILE"
 fi
 
-cat >> "$TMP_COMPOSE" <<'YML'
+cat >> "$COMPOSE_FILE" <<'YML'
     restart: unless-stopped
 
   jellyfin:
@@ -240,35 +256,39 @@ cat >> "$TMP_COMPOSE" <<'YML'
     restart: unless-stopped
 YML
 
-# move file into place with correct owner/perms
-sudo mv "$TMP_COMPOSE" "$COMPOSE_FILE"
-sudo chown 1000:1000 "$COMPOSE_FILE"
-sudo chmod 644 "$COMPOSE_FILE"
-echo "docker-compose written."
-
-# -------------------------
-# Start the stack
-# -------------------------
+# ─────────────────────────────────────────────
+# Start Containers
+# ─────────────────────────────────────────────
+echo -e "\n\033[1;32mStarting containers...\033[0m"
 cd /mnt/media/docker
-echo "==> Starting containers..."
 sudo docker compose up -d
 
-echo
-echo "==> Completed. Services:"
-echo "  Jellyfin  -> http://<your-ip>:8096"
-echo "  Radarr    -> http://<your-ip>:7878"
-echo "  Sonarr    -> http://<your-ip>:8989"
-echo "  Prowlarr  -> http://<your-ip>:9696"
-echo "  Deluge    -> http://<your-ip>:8112"
+# ─────────────────────────────────────────────
+# Fancy Outro
+# ─────────────────────────────────────────────
+clear
+sleep 1
+echo -e "\033[1;36m"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " 🎉  Setup Complete! Welcome to your Fckin nflix! 🎉"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "\033[0m"
+sleep 1
+echo -e "👉  Jellyfin:  http://$CURRENT_IP:8096"
+echo -e "👉  Radarr:    http://$CURRENT_IP:7878"
+echo -e "👉  Sonarr:    http://$CURRENT_IP:8989"
+echo -e "👉  Prowlarr:  http://$CURRENT_IP:9696"
+echo -e "👉  Deluge:    http://$CURRENT_IP:8112"
+sleep 1
 echo
 if [ -n "${MULLVAD_KEY:-}" ]; then
-  echo "NOTE: VPN keys were provided. Deluge + Prowlarr are routed via Gluetun (Mullvad)."
+  echo -e "\033[1;33mVPN ENABLED:\033[0m Deluge & Prowlarr are routed through Gluetun (Mullvad)."
 else
-  echo "NOTE: No VPN keys provided. All services run on local network (no VPN)."
+  echo -e "\033[1;33mVPN DISABLED:\033[0m Running locally (no tunneling)."
 fi
-
 echo
-echo "Check gluetun logs to confirm VPN IP (if you added keys):"
-echo "  sudo docker logs gluetun --tail 80"
-echo
-echo "Done."
+sleep 1
+echo -e "\033[1;35m👾 Made with ❤️ by Tech Lvling — Subscribe for more setups!\033[0m"
+echo -e "\033[1;34m📺 YouTube: https://www.youtube.com/@techlvling\033[0m"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+sleep 2
