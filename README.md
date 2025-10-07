@@ -11,14 +11,10 @@ Let’s fix that. This setup turns your PC or server into your **own private str
 
 ## ⚡ Quick Start (1-minute setup)
 
-💡 **Step 0 — Pre-Check (run this once):**
+💡 **Pre-Check (run this once):**
 ```bash
 sudo apt update && sudo apt install -y git dos2unix
-
-Step 1 — Clone and enter the repo
 git clone https://github.com/techlvling/Selfhostmovies.git
 cd Selfhostmovies
-Step 2 — Make it executable
 chmod +x install_media_stack.sh
-Step 3 — Run the installer
 sudo ./install_media_stack.sh
