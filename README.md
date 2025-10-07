@@ -5,7 +5,7 @@ Let’s fix that. This setup turns your PC or server into your **own private str
 
 > ⚙️ Powered by: **Docker + Jellyfin + Sonarr + Radarr + Prowlarr + Deluge**
 > 
-> 🌐 Optional: **VPN (Mullvad via Gluetun)** – For the privacy warriors.
+> 🌐 Optional: **VPN (Mullvad via Gluetun)** – For the privacy.
 
 ---
 
