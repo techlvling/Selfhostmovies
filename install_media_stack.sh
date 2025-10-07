@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling) - patched
-# Adds: optional purge, MediaFusion service + Prowlarr custom indexer YAML
+# 🎬 Selfhostmovies Installer v1.2 (Tech Lvling) - modified
+# Replaces MediaFusion with dreulavelle/Prowlarr-Indexers custom YAMLs
 # ─────────────────────────────────────────────
 
 # --- 🩹 Auto Fix CRLF Line Endings ---
@@ -94,7 +94,7 @@ echo "────────────────────────�
 # --- Step 1: Dependencies ---
 echo -e "\n\033[1;34m[ Step 1/5 ] Installing dependencies...\033[0m"
 sudo apt update -y
-sudo apt install -y curl git ca-certificates gnupg lsb-release ipcalc dos2unix
+sudo apt install -y curl git ca-certificates gnupg lsb-release ipcalc dos2unix unzip
 
 # --- Step 2: Network Setup ---
 echo -e "\n\033[1;34m[ Step 2/5 ] Network configuration...\033[0m"
@@ -280,41 +280,35 @@ cat >> "$COMPOSE_FILE" <<'YML'
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
-  # -------------------------
-  # MediaFusion (self-hosted)
-  # upstream: https://github.com/mhdzumair/MediaFusion
-  # Docker image: mhdzumair/mediafusion:latest
-  # -------------------------
-  mediafusion:
-    image: mhdzumair/mediafusion:latest
-    container_name: mediafusion
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Asia/Kolkata
-      # Optional: set an API/admin password (uncomment and change if desired)
-      # - MEDIAFUSION_API_PASSWORD=changeme
-    volumes:
-      - /mnt/media/docker/mediafusion:/data
-    ports:
-      - 5000:5000
-    restart: unless-stopped
 YML
 
-# --- Place MediaFusion YAML into Prowlarr custom definitions so Prowlarr can add it as an indexer ---
-# Prowlarr will read custom indexer definitions from <config>/Definitions/Custom/
-# We'll fetch upstream mediafusion.yaml and place it under the Prowlarr config bind on the host.
+# --- Install dreulavelle/Prowlarr-Indexers YAMLs into Prowlarr custom definitions ---
 PROWLARR_CUSTOM_DIR="/mnt/media/docker/prowlarr/Definitions/Custom"
-MEDIAFUSION_YAML_URL="https://raw.githubusercontent.com/mhdzumair/MediaFusion/main/resources/yaml/mediafusion.yaml"
+PROWLARR_INDEXERS_ZIP_URL="https://github.com/dreulavelle/Prowlarr-Indexers/archive/refs/heads/main.zip"
+TMP_ZIP="/tmp/prowlarr-indexers-main.zip"
+TMP_DIR="/tmp/prowlarr-indexers-main"
+
+echo -e "\n\033[1;34m[+] Downloading dreulavelle/Prowlarr-Indexers (main branch) and installing Custom/*.yml into Prowlarr definitions...\033[0m"
 sudo mkdir -p "$PROWLARR_CUSTOM_DIR"
-echo -e "\n\033[1;34m[+] Downloading MediaFusion indexer definition to Prowlarr custom definitions...\033[0m"
-if curl -fL "$MEDIAFUSION_YAML_URL" -o /tmp/mediafusion.yml; then
-  sudo mv /tmp/mediafusion.yml "$PROWLARR_CUSTOM_DIR/mediafusion.yaml"
-  sudo chown -R 1000:1000 /mnt/media/docker/prowlarr
-  echo -e "\033[1;32m[✓] mediafusion.yaml saved to $PROWLARR_CUSTOM_DIR/mediafusion.yaml\033[0m"
+# download zip
+if curl -fL "$PROWLARR_INDEXERS_ZIP_URL" -o "$TMP_ZIP"; then
+  rm -rf "$TMP_DIR"
+  unzip -q "$TMP_ZIP" -d /tmp
+  # move Custom YAMLs if present
+  if [ -d "/tmp/Prowlarr-Indexers-main/Custom" ]; then
+    sudo mkdir -p "$PROWLARR_CUSTOM_DIR"
+    sudo cp -v /tmp/Prowlarr-Indexers-main/Custom/*.yml "$PROWLARR_CUSTOM_DIR/" 2>/dev/null || true
+    sudo chown -R 1000:1000 /mnt/media/docker/prowlarr
+    echo -e "\033[1;32m[✓] Custom YAMLs copied to $PROWLARR_CUSTOM_DIR\033[0m"
+  else
+    echo -e "\033[1;33m[!] No Custom/ directory found in the repo zip. You can place YAMLs manually under:\033[0m"
+    echo -e "    $PROWLARR_CUSTOM_DIR"
+  fi
+  # cleanup
+  rm -rf "$TMP_ZIP" "$TMP_DIR" /tmp/Prowlarr-Indexers-main || true
 else
-  echo -e "\033[1;31m[!] Failed to download mediafusion.yaml from upstream. You can download manually from:\033[0m"
-  echo -e "    $MEDIAFUSION_YAML_URL"
+  echo -e "\033[1;31m[!] Failed to download Prowlarr-Indexers from upstream. You can download manually from:\033[0m"
+  echo -e "    https://github.com/dreulavelle/Prowlarr-Indexers"
 fi
 
 # --- Launch Containers ---
@@ -339,9 +333,7 @@ echo -e "👉  Radarr:        http://$CURRENT_IP:7878"
 echo -e "👉  Sonarr:        http://$CURRENT_IP:8989"
 echo -e "👉  Prowlarr:      http://$CURRENT_IP:9696"
 echo -e "👉  Deluge:        http://$CURRENT_IP:8112"
-echo -e "👉  MediaFusion:   http://$CURRENT_IP:5000"
 sleep 1
-echo
 if [ -n "${MULLVAD_KEY:-}" ]; then
   echo -e "\033[1;33mVPN ENABLED:\033[0m Deluge & Prowlarr are routed through Gluetun (Mullvad)."
 else
